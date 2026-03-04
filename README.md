@@ -350,7 +350,7 @@ Data Scientist – Applied Data Analysis & Generative AI
 Master's Degree — *Analisi e Modellazione dei Dati e dei Processi*
 Unitelma Sapienza – Rome, 12-2025
 
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-0A66C2?logo=linkedin)](https://www.linkedin.com/in/lucy-michaels/)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-0A66C2?logo=linkedin)](https://www.linkedin.com/in/lucymichaels/)
 
 ---
 
