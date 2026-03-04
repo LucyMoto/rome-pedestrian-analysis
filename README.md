@@ -268,31 +268,40 @@ A key challenge was that police-coded categorical variables contained **systemat
 ```
 rome-pedestrian-accidents/
 
-├── data/
-│   ├── raw/                  # Not included — see Data Access below
-│   └── processed/            # Intermediate parquet files (001–015)
-│
-├── notebooks/                # Full exploratory pipeline (001–015 + clustering)
-│
-├── src/                      # Modular pipeline scripts
-│   ├── data_processing/
-│   ├── feature_engineering/
-│   ├── clustering/
-│   └── visualization/
-│
-├── analysis/                 # R scripts: clusPCAmix, PAM, validation
+├── notebooks/                # Full analysis pipeline
+│   ├── 001_ingest_raw_files.ipynb
+│   ├── 002_merge_csv_files.ipynb
+│   ├── 003_remove_duplicates.ipynb
+│   ├── 004_filter_pedestrians.ipynb
+│   ├── 005_consolidate_person_rows.ipynb
+│   ├── 006_temporal_features.ipynb
+│   ├── 007_encode_road_variables.ipynb
+│   ├── 008_encode_ordered_features.ipynb
+│   ├── 009_weather_integration.ipynb
+│   ├── 010_maps_first_attempt.ipynb
+│   ├── 010_maps_geocoding_google_api.ipynb
+│   ├── 010_maps_second_attempt.ipynb
+│   ├── 011_final_schema_feature_selection.ipynb
+│   ├── 012_cluster_preparation.ipynb
+│   ├── 013_cluster_k_prototypes.ipynb
+│   ├── 013_cluster_k_prototypes_day_grouping.ipynb
+│   ├── 013_day_groupings_analysis.ipynb
+│   ├── 014_time_segment_analysis.ipynb
+│   ├── 014_time_segment_analysis_without_severity.ipynb
+│   ├── 015_winsorization_final_clean.ipynb
+│   ├── 020_cluster_profiles.qmd        # R: cluster profiling
+│   ├── 021_cluster_analysis_comparison.qmd  # R: method comparison
+│   └── 022_cluster_analysis_PAM.qmd    # R: PAM clustering
 │
 ├── outputs/
-│   ├── figures/
-│   └── maps/
-│
-├── config/
-│   └── parameters.yaml
+│   ├── figures/              # Static visualisations (PNG)
+│   └── maps/                 # Interactive Folium maps (HTML)
 │
 ├── environment.yml
-├── README.md
-└── LICENSE
+└── README.md
 ```
+
+> **Data files** (raw CSVs and intermediate parquet files) are not included due to size. See Data Access section below.
 
 ---
 
@@ -300,12 +309,12 @@ rome-pedestrian-accidents/
 
 ```
 Python 3.12
-R 4.x
+R 4.4.3
 ```
 
 Key Python libraries: pandas, numpy, scikit-learn, geopandas, matplotlib, seaborn, astral, pytz, pyarrow, folium, kmodes
 
-Key R packages: PCAmixdata, cluster, fpc, clusterSim, clusterCrit, ggplot2, dplyr
+Key R packages: PCAmixdata, cluster_2.1.8, fpc_2.2-13, clusterSim_0.51-5, factoextra_1.0.7, ggplot2_4.0.0, dplyr_1.1.4, tidyverse_2.0.0, plotly_4.11.0, umap_0.2.10, gower_1.0.2
 
 ---
 
