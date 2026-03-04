@@ -1,4 +1,4 @@
-name: lucy_thesis_conda_environment
+name: rome-accident-analysis
 channels:
   - defaults
   - https://repo.anaconda.com/pkgs/main
@@ -264,4 +264,3 @@ dependencies:
       - xyzservices==2025.4.0
       - ydata-profiling==4.16.1
       - zipp==3.23.0
-prefix: C:\Users\lucyq\anaconda3\envs\lucy_thesis_conda_environment
