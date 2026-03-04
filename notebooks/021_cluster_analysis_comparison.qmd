@@ -1,0 +1,768 @@
+---
+title: "Clustering Analysis Comparison"
+author: "Lucy Michaels"
+format:
+  html:
+    code-fold: false
+execute:
+  echo: true
+  warning: false
+  message: false
+  # Ensure figures are embedded as images:
+  fig-format: png
+  dpi: 144
+editor: visual
+---
+
+# Data Preparation
+
+```{r}
+R.version.string
+```
+
+```{r setup}
+library(tidyverse)
+library(cluster)
+library(manydist)
+library(clustrd)
+library(arrow)
+library(fpc)
+library(factoextra)
+library(janitor)
+library(clusterSim)
+library(umap)
+library(plotly)
+```
+
+```{r}
+# Load parquet
+df_all <- read_parquet("C:/Users/lucyq/Dropbox/AMDP/THESIS/RAnalysis/016_data_ready.parquet")
+```
+
+```{r load_df}
+# Drop columns
+drop_cols <- c(
+    "Protocollo", "severity_max"
+)
+
+df <- df_all[, setdiff(names(df_all), drop_cols)]
+```
+
+We currently have 8 features and 14849 datapoints.\
+
+```{r}
+sapply(df, class)
+```
+
+```{r}
+# Convert to factors
+df$natural_light <- factor(df$natural_light, ordered = FALSE)
+df <- df %>% mutate(across(where(is.character), as.factor))
+
+# Integer categories to factors
+int_as_cats <- c("natural_light", "road_conditions_bin", "time_segment")
+
+df <- df %>% mutate(across(any_of(int_as_cats), as.factor))
+
+# Ensure numeric
+df <- df %>% mutate(across(where(is.numeric), as.numeric))
+```
+
+# Method 1: ClusPCAmix
+
+## Analysis ClusPCAmix
+
+### Test k = 7
+
+```{r}
+# Try 5 dimensions for the internal PCA mix space
+n_clusters <- 7
+ndim_try <- 5
+results_clus_k7d5 <- cluspcamix(df, n_clusters, ndim_try,
+    method = "mixedRKM",
+    center = TRUE,
+    scale = TRUE,
+    alpha = NULL,
+    rotation = "none",
+    nstart = 50,
+    seed = c(1234, 2025, 1977)
+)
+
+print(results_clus_k7d5)
+```
+
+### Test k = 6
+
+```{r}
+# Try 5 dimensions for the internal PCA mix space
+n_clusters <- 6
+ndim_try <- 5
+results_clus_k6d5 <- cluspcamix(df, n_clusters, ndim_try,
+    method = c("mixedRKM"),
+    center = TRUE,
+    scale = TRUE,
+    alpha = NULL,
+    rotation = "none",
+    nstart = 50,
+    seed = c(1234, 2025, 1977)
+)
+
+print(results_clus_k6d5)
+```
+
+### Test k = 5
+
+```{r}
+# Try 5 dimensions for the internal PCA mix space
+n_clusters <- 5
+ndim_try <- 5
+results_clus_k5d5 <- cluspcamix(df, n_clusters, ndim_try,
+    method = c("mixedRKM"),
+    center = TRUE,
+    scale = TRUE,
+    alpha = NULL,
+    rotation = "none",
+    nstart = 50,
+    seed = c(1234, 2025, 1977)
+)
+
+print(results_clus_k5d5)
+```
+
+###Test k = 5, dim = 4
+
+```{r}
+# Try 5 dimensions for the internal PCA mix space
+n_clusters <- 5
+ndim_try <- 4
+results_clus_k5d4 <- cluspcamix(df, n_clusters, ndim_try,
+    method = c("mixedRKM"),
+    center = TRUE,
+    scale = TRUE,
+    alpha = NULL,
+    rotation = "none",
+    nstart = 50,
+    seed = c(1234, 2025, 1977)
+)
+
+print(results_clus_k5d4)
+```
+
+## Results ClusPCAmix
+
+### Results ClusPCAmix k = 7
+
+```{r}
+# Silhouette width (higher = better separation)
+sil_clus_k7d5 <- silhouette(results_clus_k7d5$cluster, dist(results_clus_k7d5$obscoord))
+
+mean(sil_clus_k7d5[, 3])
+
+fviz_silhouette(sil_clus_k7d5)
+
+summary(sil_clus_k7d5)
+
+```
+
+```{r}
+stats_clus_k7d5 <- cluster.stats(dist(results_clus_k7d5$obscoord), results_clus_k7d5$cluster)
+
+# Calculate Davies-Bouldin Index
+db_clus_k7d5 <- index.DB(x = results_clus_k7d5$obscoord, 
+                          cl = results_clus_k7d5$cluster)$DB
+
+cat(
+    "k=7, dim = 5: Silhouette =", mean(sil_clus_k7d5[, 3]),
+    ", CH =", stats_clus_k7d5$ch,
+    ", Dunn =", stats_clus_k7d5$dunn, 
+    ", DB =", db_clus_k7d5, "\n"
+)
+```
+
+### Results ClusPCAmix k = 6
+
+```{r}
+# Silhouette width (higher = better separation)
+sil_clus_k6d5 <- silhouette(results_clus_k6d5$cluster, dist(results_clus_k6d5$obscoord))
+mean(sil_clus_k6d5[, 3])
+fviz_silhouette(sil_clus_k6d5)
+summary(sil_clus_k6d5)
+```
+
+```{r}
+stats_clus_k6d5 <- cluster.stats(dist(results_clus_k6d5$obscoord), results_clus_k6d5$cluster)
+
+# Calculate Davies-Bouldin Index
+db_clus_k6d5 <- index.DB(x = results_clus_k6d5$obscoord, 
+                          cl = results_clus_k6d5$cluster)$DB
+
+cat(
+    "k=6, dim = 5: Silhouette =", mean(sil_clus_k6d5[, 3]),
+    ", CH =", stats_clus_k6d5$ch,
+    ", Dunn =", stats_clus_k6d5$dunn, 
+    ", DB =", db_clus_k6d5, "\n"
+)
+```
+
+### Results ClusPCAmix k = 5
+
+```{r}
+# Silhouette width (higher = better separation)
+sil_clus_k5d5 <- silhouette(results_clus_k5d5$cluster, dist(results_clus_k5d5$obscoord))
+mean(sil_clus_k5d5[, 3])
+fviz_silhouette(sil_clus_k5d5)
+summary(sil_clus_k5d5)
+```
+
+```{r}
+stats_clus_k5d5 <- cluster.stats(dist(results_clus_k5d5$obscoord), results_clus_k5d5$cluster)
+
+# Calculate Davies-Bouldin Index
+db_clus_k5d5 <- index.DB(x = results_clus_k5d5$obscoord, 
+                          cl = results_clus_k5d5$cluster)$DB
+
+cat(
+    "k=5, dim = 5: Silhouette =", mean(sil_clus_k5d5[, 3]),
+    ", CH =", stats_clus_k5d5$ch,
+    ", Dunn =", stats_clus_k5d5$dunn, 
+    ", DB =", db_clus_k5d5,"\n"
+)
+```
+
+### Test k = 5 but dim = 4
+
+```{r}
+# Silhouette width (higher = better separation)
+sil_clus_k5d4 <- silhouette(results_clus_k5d4$cluster, dist(results_clus_k5d4$obscoord))
+mean(sil_clus_k5d4[, 3])
+fviz_silhouette(sil_clus_k5d4)
+summary(sil_clus_k5d4)
+```
+
+```{r}
+stats_clus_k5d4 <- cluster.stats(dist(results_clus_k5d4$obscoord), results_clus_k5d4$cluster)
+
+# Calculate Davies-Bouldin Index
+db_clus_k5d4 <- index.DB(x = results_clus_k5d4$obscoord, 
+                          cl = results_clus_k5d4$cluster)$DB
+
+cat(
+    "k=5, dim = 4: Silhouette =", mean(sil_clus_k5d4[, 3]),
+    ", CH =", stats_clus_k5d4$ch,
+    ", Dunn =", stats_clus_k5d4$dunn, 
+    ", DB =", db_clus_k5d4,"\n"
+)
+```
+
+# TRY NEW VALUES OF DIMENSIONS
+
+# Test k = 5, d = 3
+
+```{r}
+# Try 3 dimensions for the internal PCA mix space
+n_clusters <- 5
+ndim_try <- 3
+results_clus_k5d3 <- cluspcamix(df, n_clusters, ndim_try,
+    method = c("mixedRKM"),
+    center = TRUE,
+    scale = TRUE,
+    alpha = NULL,
+    rotation = "none",
+    nstart = 50,
+    seed = c(1234, 2025, 1977)
+)
+
+print(results_clus_k5d3)
+```
+
+```{r}
+# Silhouette width (higher = better separation)
+sil_clus_k5d3 <- silhouette(results_clus_k5d3$cluster, dist(results_clus_k5d3$obscoord))
+mean(sil_clus_k5d3[, 3])
+fviz_silhouette(sil_clus_k5d3)
+summary(sil_clus_k5d3)
+```
+
+```{r}
+stats_clus_k5d3 <- cluster.stats(dist(results_clus_k5d3$obscoord), results_clus_k5d3$cluster)
+
+# Calculate Davies-Bouldin Index
+db_clus_k5d3 <- index.DB(x = results_clus_k5d3$obscoord, 
+                          cl = results_clus_k5d3$cluster)$DB
+
+cat(
+    "k=5, dim = 3: Silhouette =", mean(sil_clus_k5d3[, 3]),
+    ", CH =", stats_clus_k5d3$ch,
+    ", Dunn =", stats_clus_k5d3$dunn, 
+    ", DB =", db_clus_k5d3,"\n"
+)
+```
+
+## Summary of Stats when k = 5, dim = 3, 4, 5
+
+```{r}
+# Summary comparison
+comparison <- tibble(
+    d = c(3, 4, 5),
+    Silhouette = c(mean(sil_clus_k5d3[, 3]), mean(sil_clus_k5d4[, 3]), mean(sil_clus_k5d5[, 3])),
+    CH = c(stats_clus_k5d3$ch, stats_clus_k5d4$ch, stats_clus_k5d5$ch),
+    Dunn = c(stats_clus_k5d3$dunn, stats_clus_k5d4$dunn, stats_clus_k5d5$dunn), 
+    DB = c(db_clus_k5d3, db_clus_k5d4, db_clus_k5d5)
+)
+print(comparison)
+```
+
+# BEST OPTION: k = 5, d = 4
+
+```{r}
+library(umap)
+library(plotly)
+
+# Create 3D visualization projection
+umap3D_k5d4 <- umap(results_clus_k5d4$obscoord, n_components = 3)
+
+# Plot in 3D
+plot_ly(x = umap3D_k5d4$layout[,1],
+        y = umap3D_k5d4$layout[,2], 
+        z = umap3D_k5d4$layout[,3],
+        color = as.factor(results_clus_k5d4$cluster),  # convert to factor
+        type = "scatter3d",
+        mode = "markers") %>%
+  layout(scene = list(
+    xaxis = list(title = "UMAP 1"),
+    yaxis = list(title = "UMAP 2"),
+    zaxis = list(title = "UMAP 3")
+  ))
+```
+
+# EXPERIMENTATION k = 5, d = 4, varying alpha
+
+#### results_clus_k5d4 already exists
+
+```{r}
+k5d4_RKM_none_alpha_null <- results_clus_k5d4
+```
+
+```{r}
+# Try 
+k5d4_none_alpha_1 <- cluspcamix(df, 5, 4,
+    center = TRUE,
+    scale = TRUE,
+    alpha = 1,
+    rotation = "none",
+    nstart = 50,
+    seed = c(1234, 2025, 1977)
+)
+```
+
+```{r}
+# Try 
+k5d4_none_alpha_0_5 <- cluspcamix(df, 5, 4,
+    center = TRUE,
+    scale = TRUE,
+    alpha = 0.5,
+    rotation = "none",
+    nstart = 50,
+    seed = c(1234, 2025, 1977)
+)
+```
+
+```{r}
+# Try 
+k5d4_RKM_promax_alpha_null <- cluspcamix(df, 5, 4,
+    method = c("mixedRKM"),
+    center = TRUE,
+    scale = TRUE,
+    alpha = NULL,
+    rotation = "promax",
+    nstart = 50,
+    seed = c(1234, 2025, 1977)
+)
+```
+
+```{r}
+# Try 
+k5d4_FKM_none_alpha_null <- cluspcamix(df, 5, 4,
+    method = c("mixedFKM"),
+    center = TRUE,
+    scale = TRUE,
+    alpha = NULL,
+    rotation = "none",
+    nstart = 50,
+    seed = c(1234, 2025, 1977)
+)
+```
+
+```{r}
+# Try 
+k5d4_FKM_varimax_alpha_null <- cluspcamix(df, 5, 4,
+    method = c("mixedFKM"),
+    center = TRUE,
+    scale = TRUE,
+    alpha = NULL,
+    rotation = "varimax",
+    nstart = 50,
+    seed = c(1234, 2025, 1977)
+)
+```
+
+```{r}
+# Try 
+k5d4_FKM_promax_alpha_null <- cluspcamix(df, 5, 4,
+    method = c("mixedFKM"),
+    center = TRUE,
+    scale = TRUE,
+    alpha = NULL,
+    rotation = "promax",
+    nstart = 50,
+    seed = c(1234, 2025, 1977)
+)
+```
+
+```{r}
+# Silhouette width (higher = better separation)
+sil_clus_k5d3 <- silhouette(results_clus_k5d3$cluster, dist(results_clus_k5d3$obscoord))
+mean(sil_clus_k5d3[, 3])
+fviz_silhouette(sil_clus_k5d3)
+summary(sil_clus_k5d3)
+```
+
+```{r}
+stats_clus_k5d3 <- cluster.stats(dist(results_clus_k5d3$obscoord), results_clus_k5d3$cluster)
+
+# Calculate Davies-Bouldin Index
+db_clus_k5d3 <- index.DB(x = results_clus_k5d3$obscoord, 
+                          cl = results_clus_k5d3$cluster)$DB
+
+cat(
+    "k=5, dim = 3: Silhouette =", mean(sil_clus_k5d3[, 3]),
+    ", CH =", stats_clus_k5d3$ch,
+    ", Dunn =", stats_clus_k5d3$dunn, 
+    ", DB =", db_clus_k5d3,"\n"
+)
+```
+
+## Summary of Stats when dim = 5
+
+```{r}
+# Summary comparison
+comparison <- tibble(
+    k = c(5, 6, 7),
+    Silhouette = c(mean(sil_clus_k5d5[, 3]), mean(sil_clus_k6d5[, 3]), mean(sil_clus_k7d5[, 3])),
+    CH = c(stats_clus_k5d5$ch, stats_clus_k6d5$ch, stats_clus_k7d5$ch),
+    Dunn = c(stats_clus_k5d5$dunn, stats_clus_k6d5$dunn, stats_clus_k7d5$dunn), 
+    DB = c(db_clus_k5d5, db_clus_k6d5, db_clus_k7d5)
+)
+print(comparison)
+```
+
+```{r}
+# Add cluster assignments to your original data
+data_clustered <- results_clus_k5d4$odata %>%
+  mutate(cluster = as.factor(results_clus_k5d4$cluster))
+
+# 1. NUMERICAL FEATURES - Summary statistics by cluster
+numerical_summary <- data_clustered %>%
+  group_by(cluster) %>%
+  summarise(
+    n = n(),
+    temp_mean = mean(temp_celsius),
+    temp_sd = sd(temp_celsius),
+    humidity_mean = mean(humidity_percent),
+    humidity_sd = sd(humidity_percent),
+    precip_mean = mean(precipitation_winsorized),
+    precip_sd = sd(precipitation_winsorized),
+    wind_mean = mean(wind_gusts_winsorized),
+    wind_sd = sd(wind_gusts_winsorized),
+    dry_spell_mean = mean(dry_spells_winsorized),
+    dry_spell_sd = sd(dry_spells_winsorized)
+  )
+
+print(numerical_summary)
+
+# 2. CATEGORICAL FEATURES - Frequency distributions
+categorical_summary <- data_clustered %>%
+  group_by(cluster) %>%
+  count(time_segment, natural_light, road_conditions_bin) %>%
+  arrange(cluster, desc(n))
+
+# Top categories per cluster
+top_categories <- data_clustered %>%
+  group_by(cluster) %>%
+  summarise(
+    top_time = names(sort(table(time_segment), decreasing = TRUE))[1],
+    top_light = names(sort(table(natural_light), decreasing = TRUE))[1],
+    top_road = names(sort(table(road_conditions_bin), decreasing = TRUE))[1]
+  )
+
+print(top_categories)
+
+# 3. LIFT ANALYSIS (like your K-Prototypes output)
+calculate_lift <- function(data, var) {
+  data %>%
+    group_by(cluster, !!sym(var)) %>%
+    summarise(n = n(), .groups = "drop") %>%
+    group_by(cluster) %>%
+    mutate(cluster_prop = n / sum(n)) %>%
+    ungroup() %>%
+    group_by(!!sym(var)) %>%
+    mutate(overall_prop = sum(n) / nrow(data)) %>%
+    ungroup() %>%
+    mutate(lift = cluster_prop / overall_prop) %>%
+    arrange(cluster, desc(lift))
+}
+
+time_lift <- calculate_lift(data_clustered, "time_segment")
+light_lift <- calculate_lift(data_clustered, "natural_light")
+road_lift <- calculate_lift(data_clustered, "road_conditions_bin")
+
+print("Time Segment Lift:")
+print(time_lift)
+print("Natural Light Lift:")
+print(light_lift)
+print("Road Conditions Lift:")
+print(road_lift)
+
+# 4. VISUALIZE - Boxplots for numerical features
+library(ggplot2)
+library(patchwork)
+
+p1 <- ggplot(data_clustered, aes(x = cluster, y = temp_celsius, fill = cluster)) +
+  geom_boxplot() + theme_minimal() + labs(title = "Temperature by Cluster", y = "Temperature (°C)")
+
+p2 <- ggplot(data_clustered, aes(x = cluster, y = humidity_percent, fill = cluster)) +
+  geom_boxplot() + theme_minimal() + labs(title = "Humidity by Cluster", y = "Humidity (%)")
+
+p3 <- ggplot(data_clustered, aes(x = cluster, y = wind_gusts_winsorized, fill = cluster)) +
+  geom_boxplot() + theme_minimal() + labs(title = "Wind by Cluster", y = "Wind Gusts (km/h)")
+
+p4 <- ggplot(data_clustered, aes(x = cluster, y = dry_spells_winsorized, fill = cluster)) +
+  geom_boxplot() + theme_minimal() + labs(title = "Dry Spells by Cluster", y = "Dry Spell Duration (days)")
+
+(p1 + p2) / (p3 + p4)
+
+# 5. CLUSTER CENTROIDS in original space
+cluster_centroids <- data_clustered %>%
+  group_by(cluster) %>%
+  summarise(across(where(is.numeric), mean))
+
+print(cluster_centroids)
+
+# 6. STATISTICAL SIGNIFICANCE - ANOVA for numerical features
+anova_temp <- aov(temp_celsius ~ cluster, data = data_clustered)
+anova_humidity <- aov(humidity_percent ~ cluster, data = data_clustered)
+anova_wind <- aov(wind_gusts_winsorized ~ cluster, data = data_clustered)
+anova_dry <- aov(dry_spells_winsorized ~ cluster, data = data_clustered)
+anova_precip <- aov(precipitation_winsorized ~ cluster, data = data_clustered)
+
+cat("\n=== ANOVA Results ===\n")
+cat("\nTemperature:\n")
+summary(anova_temp)
+cat("\nHumidity:\n")
+summary(anova_humidity)
+cat("\nWind Gusts:\n")
+summary(anova_wind)
+cat("\nDry Spells:\n")
+summary(anova_dry)
+cat("\nPrecipitation:\n")
+summary(anova_precip)
+
+# 7. CHI-SQUARE tests for categorical features
+cat("\n=== Chi-Square Results ===\n")
+cat("\nTime Segment:\n")
+print(chisq.test(table(data_clustered$cluster, data_clustered$time_segment)))
+cat("\nNatural Light:\n")
+print(chisq.test(table(data_clustered$cluster, data_clustered$natural_light)))
+cat("\nRoad Conditions:\n")
+print(chisq.test(table(data_clustered$cluster, data_clustered$road_conditions_bin)))
+
+# 8. EFFECT SIZE for numerical features (eta-squared)
+library(effectsize)
+eta_squared(anova_temp)
+eta_squared(anova_humidity)
+eta_squared(anova_wind)
+eta_squared(anova_dry)
+eta_squared(anova_precip)
+```
+
+Now we try to get profiles of each cluster:
+
+```{r}
+# ===== PREPARE DATA =====
+# Add cluster assignments to your data
+data_clustered <- results_clus_k5d4$odata %>%
+  mutate(cluster = as.factor(results_clus_k5d4$cluster))
+
+# Create cluster profiles
+cluster_profiles <- data_clustered %>%
+  group_by(cluster) %>%
+  summarise(n = n()) %>%
+  mutate(pct = round(n/sum(n)*100, 1))
+
+# ===== VISUALIZATIONS =====
+
+# 1. Cluster sizes
+library(ggplot2)
+p1 <- ggplot(cluster_profiles, aes(x = reorder(factor(cluster), -n), y = n)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  geom_text(aes(label = paste0(n, "\n(", pct, "%)")), vjust = -0.3, size = 3) +
+  labs(title = "Accident Distribution Across 5 Clusters (ClusPCAmix)",
+       x = "Cluster", y = "Number of Accidents") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 0))
+print(p1)
+
+# 2. Silhouette plot (you already have this with fviz_silhouette)
+fviz_silhouette(sil_clus_k5d4, 
+                palette = "jco",
+                ggtheme = theme_minimal()) +
+  labs(title = "Silhouette Plot (k=5, d=4)")
+
+# 3. Cluster composition by natural light
+p2 <- data_clustered %>%
+  group_by(cluster, natural_light) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(cluster) %>%
+  mutate(pct = n/sum(n)*100) %>%
+  ggplot(aes(x = factor(cluster), y = pct, fill = natural_light)) +
+  geom_bar(stat = "identity", color = "black") +
+  labs(title = "Natural Light Conditions by Cluster",
+       x = "Cluster", y = "Percentage", fill = "Light") +
+  theme_minimal() +
+  scale_fill_manual(values = c("light_day" = "gold", 
+                              "light_twilight" = "steelblue", 
+                              "light_night" = "navy"))
+print(p2)
+
+# 4. Cluster composition by time segment
+p3 <- data_clustered %>%
+  group_by(cluster, time_segment) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(cluster) %>%
+  mutate(pct = n/sum(n)*100) %>%
+  ggplot(aes(x = factor(cluster), y = pct, fill = factor(time_segment))) +
+  geom_bar(stat = "identity") +
+  labs(title = "Time Segment by Cluster",
+       x = "Cluster", y = "Percentage", fill = "Time") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set2")
+print(p3)
+
+# 5. Cluster composition by road conditions
+p4 <- data_clustered %>%
+  group_by(cluster, road_conditions_bin) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(cluster) %>%
+  mutate(pct = n/sum(n)*100) %>%
+  ggplot(aes(x = factor(cluster), y = pct, fill = factor(road_conditions_bin))) +
+  geom_bar(stat = "identity") +
+  labs(title = "Road Conditions by Cluster",
+       x = "Cluster", y = "Percentage", fill = "Road") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Dark2")
+print(p4)
+
+# 6. Weather profiles by cluster (using pivot_longer for faceted view)
+weather_long <- data_clustered %>%
+  select(cluster, temp_celsius, precipitation_winsorized, 
+         wind_gusts_winsorized, humidity_percent, dry_spells_winsorized) %>%
+  pivot_longer(-cluster, names_to = "variable", values_to = "value")
+
+p5 <- ggplot(weather_long, aes(x = factor(cluster), y = value)) +
+  geom_boxplot(aes(fill = factor(cluster))) +
+  facet_wrap(~variable, scales = "free_y", ncol = 2) +
+  labs(title = "Weather Conditions by Cluster",
+       x = "Cluster", y = "Value") +
+  theme_minimal() +
+  theme(legend.position = "none")
+print(p5)
+
+# 7. Individual weather variable plots (alternative to faceted view)
+library(patchwork)
+
+pw1 <- ggplot(data_clustered, aes(x = cluster, y = temp_celsius, fill = cluster)) +
+  geom_boxplot() + 
+  theme_minimal() + 
+  labs(title = "Temperature", y = "°C") +
+  theme(legend.position = "none")
+
+pw2 <- ggplot(data_clustered, aes(x = cluster, y = humidity_percent, fill = cluster)) +
+  geom_boxplot() + 
+  theme_minimal() + 
+  labs(title = "Humidity", y = "%") +
+  theme(legend.position = "none")
+
+pw3 <- ggplot(data_clustered, aes(x = cluster, y = wind_gusts_winsorized, fill = cluster)) +
+  geom_boxplot() + 
+  theme_minimal() + 
+  labs(title = "Wind Gusts", y = "km/h") +
+  theme(legend.position = "none")
+
+pw4 <- ggplot(data_clustered, aes(x = cluster, y = precipitation_winsorized, fill = cluster)) +
+  geom_boxplot() + 
+  theme_minimal() + 
+  labs(title = "Precipitation", y = "mm") +
+  theme(legend.position = "none")
+
+(pw1 + pw2) / (pw3 + pw4) + 
+  plot_annotation(title = "Weather Variables by Cluster")
+
+# ===== CLUSTER QUALITY METRICS =====
+cat("\n=== CLUSTER QUALITY METRICS (k=5, d=4) ===\n")
+cat(sprintf("Average Silhouette Width: %.4f\n", mean(sil_clus_k5d4[, 3])))
+cat(sprintf("Calinski-Harabasz Index: %.2f\n", stats_clus_k5d4$ch))
+cat(sprintf("Dunn Index: %.4f\n", stats_clus_k5d4$dunn))
+cat(sprintf("Davies-Bouldin Index: %.4f\n", db_clus_k5d4))
+
+cat("\nSilhouette Width by Cluster:\n")
+sil_summary <- summary(sil_clus_k5d4)
+print(sil_summary$clus.avg.widths)
+
+cat("\nCluster with lowest quality: ", 
+    which.min(sil_summary$clus.avg.widths), 
+    " (Sil=", round(min(sil_summary$clus.avg.widths), 4), ")\n")
+cat("Cluster with highest quality: ", 
+    which.max(sil_summary$clus.avg.widths), 
+    " (Sil=", round(max(sil_summary$clus.avg.widths), 4), ")\n")
+
+# Number of poorly clustered observations
+poorly_clustered <- sum(sil_clus_k5d4[, 3] < 0)
+cat(sprintf("\nPoorly clustered accidents: %d (%.1f%%)\n", 
+            poorly_clustered, poorly_clustered/nrow(data_clustered)*100))
+
+# Cluster sizes
+cat("\nCluster Sizes:\n")
+print(cluster_profiles)
+
+# ===== SAVE RESULTS =====
+cat("\n=== SAVING RESULTS ===\n")
+
+# Save the clustered data
+write.csv(data_clustered, "accidents_clustered_k5d4.csv", row.names = FALSE)
+cat("✓ Saved: accidents_clustered_k5d4.csv\n")
+
+# Save cluster profiles
+write.csv(cluster_profiles, "cluster_profiles_k5d4.csv", row.names = FALSE)
+cat("✓ Saved: cluster_profiles_k5d4.csv\n")
+
+# Save clustering info
+clustering_info <- list(
+  method = "ClusPCAmix_mixedRKM",
+  k = 5,
+  ndim = 4,
+  silhouette_avg = mean(sil_clus_k5d4[, 3]),
+  ch_index = stats_clus_k5d4$ch,
+  dunn_index = stats_clus_k5d4$dunn,
+  db_index = db_clus_k5d4,
+  cluster_sizes = table(data_clustered$cluster),
+  cluster_assignments = results_clus_k5d4$cluster
+)
+saveRDS(clustering_info, "clustering_info_k5d4.rds")
+cat("✓ Saved: clustering_info_k5d4.rds\n")
+
+# Save the full results object
+saveRDS(results_clus_k5d4, "cluspcamix_results_k5d4.rds")
+cat("✓ Saved: cluspcamix_results_k5d4.rds\n")
+
+cat("\n=== CLUSTERING VISUALIZATION COMPLETE! ===\n")
+```

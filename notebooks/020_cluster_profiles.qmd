@@ -1,0 +1,191 @@
+---
+title: "Cluster Analysis - Cluster Profiles"
+format: html
+editor: visual
+---
+
+## Quarto
+
+```{r}
+# ===== PREPARE DATA =====
+# Add cluster assignments to your data
+data_clustered <- results_clus_k5d4$odata %>%
+  mutate(cluster = as.factor(results_clus_k5d4$cluster))
+
+# Create cluster profiles
+cluster_profiles <- data_clustered %>%
+  group_by(cluster) %>%
+  summarise(n = n()) %>%
+  mutate(pct = round(n/sum(n)*100, 1))
+
+# ===== VISUALIZATIONS =====
+
+# 1. Cluster sizes
+library(ggplot2)
+p1 <- ggplot(cluster_profiles, aes(x = reorder(factor(cluster), -n), y = n)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  geom_text(aes(label = paste0(n, "\n(", pct, "%)")), vjust = -0.3, size = 3) +
+  labs(title = "Accident Distribution Across 5 Clusters (ClusPCAmix)",
+       x = "Cluster", y = "Number of Accidents") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 0))
+print(p1)
+
+# 2. Silhouette plot (you already have this with fviz_silhouette)
+fviz_silhouette(sil_clus_k5d4, 
+                palette = "jco",
+                ggtheme = theme_minimal()) +
+  labs(title = "Silhouette Plot (k=5, d=4)")
+
+# 3. Cluster composition by natural light
+p2 <- data_clustered %>%
+  group_by(cluster, natural_light) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(cluster) %>%
+  mutate(pct = n/sum(n)*100) %>%
+  ggplot(aes(x = factor(cluster), y = pct, fill = natural_light)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Natural Light Conditions by Cluster",
+       x = "Cluster", y = "Percentage", fill = "Light") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set2")
+print(p2)
+
+# 4. Cluster composition by time segment
+p3 <- data_clustered %>%
+  group_by(cluster, time_segment) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(cluster) %>%
+  mutate(pct = n/sum(n)*100) %>%
+  ggplot(aes(x = factor(cluster), y = pct, fill = factor(time_segment))) +
+  geom_bar(stat = "identity") +
+  labs(title = "Time Segment by Cluster",
+       x = "Cluster", y = "Percentage", fill = "Time") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set1")
+print(p3)
+
+# 5. Cluster composition by road conditions
+p4 <- data_clustered %>%
+  group_by(cluster, road_conditions_bin) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(cluster) %>%
+  mutate(pct = n/sum(n)*100) %>%
+  ggplot(aes(x = factor(cluster), y = pct, fill = factor(road_conditions_bin))) +
+  geom_bar(stat = "identity") +
+  labs(title = "Road Conditions by Cluster",
+       x = "Cluster", y = "Percentage", fill = "Road") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Dark2")
+print(p4)
+
+# 6. Weather profiles by cluster (using pivot_longer for faceted view)
+weather_long <- data_clustered %>%
+  select(cluster, temp_celsius, precipitation_winsorized, 
+         wind_gusts_winsorized, humidity_percent, dry_spells_winsorized) %>%
+  pivot_longer(-cluster, names_to = "variable", values_to = "value")
+
+p5 <- ggplot(weather_long, aes(x = factor(cluster), y = value)) +
+  geom_boxplot(aes(fill = factor(cluster))) +
+  facet_wrap(~variable, scales = "free_y", ncol = 2) +
+  labs(title = "Weather Conditions by Cluster",
+       x = "Cluster", y = "Value") +
+  theme_minimal() +
+  theme(legend.position = "none")
+print(p5)
+
+# 7. Individual weather variable plots (alternative to faceted view)
+library(patchwork)
+
+pw1 <- ggplot(data_clustered, aes(x = cluster, y = temp_celsius, fill = cluster)) +
+  geom_boxplot() + 
+  theme_minimal() + 
+  labs(title = "Temperature", y = "°C") +
+  theme(legend.position = "none")
+
+pw2 <- ggplot(data_clustered, aes(x = cluster, y = humidity_percent, fill = cluster)) +
+  geom_boxplot() + 
+  theme_minimal() + 
+  labs(title = "Humidity", y = "%") +
+  theme(legend.position = "none")
+
+pw3 <- ggplot(data_clustered, aes(x = cluster, y = wind_gusts_winsorized, fill = cluster)) +
+  geom_boxplot() + 
+  theme_minimal() + 
+  labs(title = "Wind Gusts", y = "km/h") +
+  theme(legend.position = "none")
+
+pw4 <- ggplot(data_clustered, aes(x = cluster, y = precipitation_winsorized, fill = cluster)) +
+  geom_boxplot() + 
+  theme_minimal() + 
+  labs(title = "Precipitation", y = "mm") +
+  theme(legend.position = "none")
+
+(pw1 + pw2) / (pw3 + pw4) + 
+  plot_annotation(title = "Weather Variables by Cluster")
+
+# ===== CLUSTER QUALITY METRICS =====
+cat("\n=== CLUSTER QUALITY METRICS (k=5, d=4) ===\n")
+cat(sprintf("Average Silhouette Width: %.4f\n", mean(sil_clus_k5d4[, 3])))
+cat(sprintf("Calinski-Harabasz Index: %.2f\n", stats_clus_k5d4$ch))
+cat(sprintf("Dunn Index: %.4f\n", stats_clus_k5d4$dunn))
+cat(sprintf("Davies-Bouldin Index: %.4f\n", db_clus_k5d4))
+
+cat("\nSilhouette Width by Cluster:\n")
+sil_summary <- summary(sil_clus_k5d4)
+print(sil_summary$clus.avg.widths)
+
+cat("\nCluster with lowest quality: ", 
+    which.min(sil_summary$clus.avg.widths), 
+    " (Sil=", round(min(sil_summary$clus.avg.widths), 4), ")\n")
+cat("Cluster with highest quality: ", 
+    which.max(sil_summary$clus.avg.widths), 
+    " (Sil=", round(max(sil_summary$clus.avg.widths), 4), ")\n")
+
+# Number of poorly clustered observations
+poorly_clustered <- sum(sil_clus_k5d4[, 3] < 0)
+cat(sprintf("\nPoorly clustered accidents: %d (%.1f%%)\n", 
+            poorly_clustered, poorly_clustered/nrow(data_clustered)*100))
+
+# Cluster sizes
+cat("\nCluster Sizes:\n")
+print(cluster_profiles)
+
+# ===== SAVE RESULTS =====
+cat("\n=== SAVING RESULTS ===\n")
+
+# Save the clustered data
+write.csv(data_clustered, "accidents_clustered_k5d4.csv", row.names = FALSE)
+cat("✓ Saved: accidents_clustered_k5d4.csv\n")
+
+# Save cluster profiles
+write.csv(cluster_profiles, "cluster_profiles_k5d4.csv", row.names = FALSE)
+cat("✓ Saved: cluster_profiles_k5d4.csv\n")
+
+# Save clustering info
+clustering_info <- list(
+  method = "ClusPCAmix_mixedRKM",
+  k = 5,
+  ndim = 4,
+  silhouette_avg = mean(sil_clus_k5d4[, 3]),
+  ch_index = stats_clus_k5d4$ch,
+  dunn_index = stats_clus_k5d4$dunn,
+  db_index = db_clus_k5d4,
+  cluster_sizes = table(data_clustered$cluster),
+  cluster_assignments = results_clus_k5d4$cluster
+)
+saveRDS(clustering_info, "clustering_info_k5d4.rds")
+cat("✓ Saved: clustering_info_k5d4.rds\n")
+
+# Save the full results object
+saveRDS(results_clus_k5d4, "cluspcamix_results_k5d4.rds")
+cat("✓ Saved: cluspcamix_results_k5d4.rds\n")
+
+cat("\n=== CLUSTERING VISUALIZATION COMPLETE! ===\n")
+```
+
+FOR ALL ACCIDENTS:
+
+```{r}
+
+```

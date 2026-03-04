@@ -1,0 +1,968 @@
+---
+title: "Clustering Analysis PAM"
+author: "Lucy Michaels"
+format:
+  html:
+    code-fold: false
+execute:
+  echo: true
+  warning: false
+  message: false
+  # Ensure figures are embedded as images:
+  fig-format: png
+  dpi: 144
+editor: visual
+---
+
+# Data Preparation
+
+```{r}
+R.version.string
+```
+
+```{r setup}
+library(tidyverse)
+library(cluster)
+library(manydist)
+library(clustrd)
+library(arrow)
+library(factoextra)
+library(dplyr)
+library(catdist)
+
+```
+
+```{r}
+# Detach manydist to avoid conflicts
+detach("package:manydist", unload = TRUE)
+
+# Now reload catdist
+library(catdist)
+```
+
+```{r}
+# Load parquet
+df_full <- read_parquet("C:/Users/lucyq/Dropbox/AMDP/THESIS/RAnalysis/016_data_ready.parquet")
+```
+
+```{r load_df}
+# Drop columns
+drop_cols <- c(
+    "Protocollo", "severity_max"
+)
+
+df <- df_full[, setdiff(names(df_full), drop_cols)]
+```
+
+We currently have 8 features and 14849 datapoints.
+
+```{r}
+# Convert to factors
+df$natural_light <- factor(df$natural_light, ordered = FALSE)
+df <- df %>% mutate(across(where(is.character), as.factor))
+
+# Integer categories to factors
+int_as_cats <- c("natural_light", "road_conditions_bin", "time_segment")
+
+df <- df %>% mutate(across(any_of(int_as_cats), as.factor))
+
+# Ensure numeric
+df <- df %>% mutate(across(where(is.numeric), as.numeric))
+```
+
+Now we have 3 features as factors & 5 features as numerical
+
+We use daisy to calculate a dissimilarity matrix, giving the combined, normalized difference between data points accounting for column type, then PAM to test different values of k cluster:
+
+```{r}
+# Compute the Gower dissimilarity matrix
+dissim <- daisy(df, metric = "gower")
+
+# Test different k values and find optimal
+k_range <- 5:10  # Test 4 to 8 clusters
+silhouette_scores <- numeric(length(k_range))
+pam_models <- list()
+
+cat("Testing different numbers of clusters...\n")
+for (i in seq_along(k_range)) {
+  k <- k_range[i]
+  pam_k <- pam(dissim, k = k, diss = TRUE)
+  silhouette_scores[i] <- pam_k$silinfo$avg.width
+  pam_models[[i]] <- pam_k
+  cat(sprintf("k = %d: Silhouette = %.4f\n", k, silhouette_scores[i]))
+}
+
+# Find optimal k (highest silhouette score)
+optimal_idx <- which.max(silhouette_scores)
+optimal_k <- k_range[optimal_idx]
+optimal_silhouette <- silhouette_scores[optimal_idx]
+
+cat(sprintf("\n*** OPTIMAL k = %d (Silhouette = %.4f) ***\n\n", 
+            optimal_k, optimal_silhouette))
+
+# Plot silhouette scores
+plot(k_range, silhouette_scores, type = "b", 
+     xlab = "Number of Clusters (k)", 
+     ylab = "Average Silhouette Width",
+     main = "Optimal k Selection",
+     pch = 19, col = "blue", lwd = 2)
+points(optimal_k, optimal_silhouette, col = "red", pch = 19, cex = 2)
+text(optimal_k, optimal_silhouette, 
+     labels = paste0("k=", optimal_k), 
+     pos = 3, col = "red", font = 2)
+abline(h = c(0.25, 0.5), lty = 2, col = "gray")
+text(max(k_range), 0.25, "Weak", pos = 2, col = "gray")
+text(max(k_range), 0.5, "Reasonable", pos = 2, col = "gray")
+
+# Use the optimal clustering
+pam_results <- pam_models[[optimal_idx]]
+
+# Add cluster assignment to dataframe
+df$cluster <- pam_results$clustering
+
+# Summary
+cat("\nCluster Sizes:\n")
+print(table(df$cluster))
+
+cat("\nCluster Silhouette Widths:\n")
+print(pam_results$silinfo$clus.avg.widths)
+
+# Plot the optimal silhouette
+plot(pam_results, which.plots = 2, 
+     main = paste0("Silhouette Plot (k=", optimal_k, ")"))
+```
+
+```         
+```
+
+Instead, we can try the catdist package
+
+```{r}
+# Prepare your data (remove any existing cluster column)
+df_clean <- df %>% select(-any_of("cluster"))
+
+# Separate categorical and numerical variables
+df_categorical <- df_clean %>% 
+  select(natural_light, time_segment, road_conditions_bin)
+
+df_numerical <- df_clean %>% 
+  select(precipitation_winsorized, temp_celsius, wind_gusts_winsorized, 
+         humidity_percent, dry_spells_winsorized)
+
+# 1. Compute catdist for categorical variables
+cat("Computing catdist for categorical variables...\n")
+dist_cat <- catdist::cdist(df_categorical, method = "tot_var_dist")
+D_cat <- dist_cat$distance_mat
+
+# 2. Compute distance for numerical variables (scaled)
+cat("Computing distance for numerical variables...\n")
+df_numerical_scaled <- scale(df_numerical)  # Standardize
+D_num <- dist(df_numerical_scaled, method = "euclidean")  # or "manhattan"
+D_num <- as.matrix(D_num)
+
+# 3. Normalize both distance matrices to [0, 1] range
+D_cat_norm <- D_cat / max(D_cat)
+D_num_norm <- D_num / max(D_num)
+
+# 4. Combine with weights (adjust weights as needed)
+weight_cat <- 0.5  # Weight for categorical distance
+weight_num <- 0.5  # Weight for numerical distance
+
+D_combined <- weight_cat * D_cat_norm + weight_num * D_num_norm
+
+# 5. Test different k values
+k_range <- 5:10
+silhouette_scores <- numeric(length(k_range))
+pam_models <- list()
+
+cat("\nTesting combined distance with different k values:\n")
+for (i in seq_along(k_range)) {
+  k <- k_range[i]
+  pam_k <- pam(D_combined, k = k, diss = TRUE)
+  silhouette_scores[i] <- pam_k$silinfo$avg.width
+  pam_models[[i]] <- pam_k
+  cat(sprintf("k=%d: Sil=%.4f\n", k, silhouette_scores[i]))
+}
+
+# 6. Use optimal k
+optimal_k <- k_range[which.max(silhouette_scores)]
+optimal_sil <- max(silhouette_scores)
+pam_final <- pam_models[[which.max(silhouette_scores)]]
+
+cat(sprintf("\n*** OPTIMAL: k=%d, Silhouette=%.4f ***\n", optimal_k, optimal_sil))
+
+# Add to dataframe
+df$cluster_combined <- pam_final$clustering
+
+# Plot
+plot(pam_final, which.plots = 2, 
+     main = sprintf("Combined Distance (catdist + euclidean, k=%d)", optimal_k))
+
+# Cluster summary
+cluster_summary <- df %>%
+  group_by(cluster_combined) %>%
+  summarise(
+    n = n(),
+    avg_temp = round(mean(temp_celsius), 2),
+    avg_precip = round(mean(precipitation_winsorized), 2),
+    avg_wind = round(mean(wind_gusts_winsorized), 2),
+    avg_humidity = round(mean(humidity_percent), 2),
+    pct_bad_roads = round(mean(road_conditions_bin == "1") * 100, 1),
+    most_common_light = names(which.max(table(natural_light))),
+    most_common_time = names(which.max(table(time_segment))),
+    .groups = "drop"
+  )
+
+print(cluster_summary)
+```
+
+Now we can try different weightings:
+
+```{r}
+# Test different weight combinations
+weight_combinations <- list(
+  c(cat = 0.3, num = 0.7),  # Emphasize numerical
+  c(cat = 0.5, num = 0.5),  # Equal weight
+  c(cat = 0.7, num = 0.3)   # Emphasize categorical
+)
+
+results <- list()
+
+for (weights in weight_combinations) {
+  D_combined <- weights["cat"] * D_cat_norm + weights["num"] * D_num_norm
+  pam_k <- pam(D_combined, k = optimal_k, diss = TRUE)
+  
+  results[[paste0("cat:", weights["cat"])]] <- list(
+    silhouette = pam_k$silinfo$avg.width,
+    weights = weights
+  )
+  
+  cat(sprintf("Weights (cat=%.1f, num=%.1f): Sil=%.4f\n", 
+              weights["cat"], weights["num"], 
+              pam_k$silinfo$avg.width))
+}
+
+# Find best weighting
+best_idx <- which.max(sapply(results, function(x) x$silhouette))
+best_weights <- results[[best_idx]]$weights
+cat(sprintf("\nBest weights: cat=%.1f, num=%.1f\n", 
+            best_weights["cat"], best_weights["num"]))
+```
+
+Try different catdist methods:
+
+```{r}
+# Test different catdist methods for categorical variables
+catdist_methods <- c("tot_var_dist", "var_mutability", "hellinger")
+
+for (method in catdist_methods) {
+  dist_cat <- catdist::cdist(df_categorical, method = method)
+  D_cat <- dist_cat$distance_mat
+  D_cat_norm <- D_cat / max(D_cat)
+  
+  D_combined <- best_weights["cat"] * D_cat_norm + best_weights["num"] * D_num_norm
+  pam_k <- pam(D_combined, k = optimal_k, diss = TRUE)
+  
+  cat(sprintf("%s: Sil=%.4f\n", method, pam_k$silinfo$avg.width))
+}
+```
+
+Compare all
+
+```{r}
+# Compare: Gower vs catdist-only vs combined
+dissim_gower <- daisy(df_clean, metric = "gower")
+pam_gower <- pam(dissim_gower, k = optimal_k, diss = TRUE)
+
+pam_catdist_only <- pam(D_cat, k = optimal_k, diss = TRUE)
+
+cat("\n=== COMPARISON ===\n")
+cat(sprintf("Gower (mixed):          %.4f\n", pam_gower$silinfo$avg.width))
+cat(sprintf("catdist only (3 vars):  %.4f\n", pam_catdist_only$silinfo$avg.width))
+cat(sprintf("Combined (8 vars):      %.4f\n", pam_final$silinfo$avg.width))
+```
+
+We will try other weightings with different k values and hellinger method:
+
+```{r}
+# Separate variables
+df_categorical <- df_clean %>% 
+  select(natural_light, time_segment, road_conditions_bin)
+
+df_numerical <- df_clean %>% 
+  select(precipitation_winsorized, temp_celsius, wind_gusts_winsorized, 
+         humidity_percent, dry_spells_winsorized)
+
+# Compute distances
+cat("Computing hellinger distance for categorical variables...\n")
+dist_cat <- catdist::cdist(df_categorical, method = "hellinger")
+D_cat <- dist_cat$distance_mat
+
+cat("Computing euclidean distance for numerical variables...\n")
+df_numerical_scaled <- scale(df_numerical)
+D_num <- dist(df_numerical_scaled, method = "euclidean")
+D_num <- as.matrix(D_num)
+
+# Normalize to [0, 1]
+D_cat_norm <- D_cat / max(D_cat)
+D_num_norm <- D_num / max(D_num)
+
+# Test different weight combinations
+weight_cat_options <- seq(0.7, 0.9, by = 0.1)  # Test 0.7, 0.8, 0.9
+k_range <- 5:10
+
+results_matrix <- matrix(NA, nrow = length(weight_cat_options), ncol = length(k_range))
+rownames(results_matrix) <- paste0("cat_", weight_cat_options)
+colnames(results_matrix) <- paste0("k=", k_range)
+
+cat("\n=== TESTING WEIGHT COMBINATIONS ===\n")
+cat("(Rows = categorical weight, Columns = k)\n\n")
+
+best_overall_sil <- -Inf
+best_weight <- NULL
+best_k <- NULL
+best_pam <- NULL
+
+for (i in seq_along(weight_cat_options)) {
+  weight_cat <- weight_cat_options[i]
+  weight_num <- 1 - weight_cat
+  
+  cat(sprintf("Testing weight: cat=%.1f, num=%.1f\n", weight_cat, weight_num))
+  
+  # Combine distances
+  D_combined <- weight_cat * D_cat_norm + weight_num * D_num_norm
+  
+  for (j in seq_along(k_range)) {
+    k <- k_range[j]
+    pam_k <- pam(D_combined, k = k, diss = TRUE)
+    sil <- pam_k$silinfo$avg.width
+    results_matrix[i, j] <- sil
+    
+    cat(sprintf("  k=%d: Sil=%.4f\n", k, sil))
+    
+    # Track best overall
+    if (sil > best_overall_sil) {
+      best_overall_sil <- sil
+      best_weight <- weight_cat
+      best_k <- k
+      best_pam <- pam_k
+    }
+  }
+  cat("\n")
+}
+
+# Display results matrix
+cat("=== RESULTS MATRIX ===\n")
+print(round(results_matrix, 4))
+
+# Find best for each weight
+cat("\n=== BEST k FOR EACH WEIGHT ===\n")
+for (i in seq_along(weight_cat_options)) {
+  weight_cat <- weight_cat_options[i]
+  best_k_for_weight <- k_range[which.max(results_matrix[i, ])]
+  best_sil_for_weight <- max(results_matrix[i, ])
+  cat(sprintf("cat=%.1f: k=%d, Sil=%.4f\n", 
+              weight_cat, best_k_for_weight, best_sil_for_weight))
+}
+
+# Overall winner
+cat(sprintf("\n*** OPTIMAL SOLUTION ***\n"))
+cat(sprintf("Method: hellinger (combined)\n"))
+cat(sprintf("Weights: cat=%.1f, num=%.1f\n", best_weight, 1-best_weight))
+cat(sprintf("k = %d\n", best_k))
+cat(sprintf("Silhouette = %.4f\n\n", best_overall_sil))
+
+# Apply best clustering
+df$cluster_hellinger_combined <- best_pam$clustering
+
+# Visualize
+par(mfrow = c(2, 2))
+
+# 1. Heatmap of results
+image(1:length(k_range), 1:length(weight_cat_options), 
+      t(results_matrix), 
+      xlab = "k", ylab = "Categorical Weight",
+      main = "Silhouette Scores Heatmap",
+      col = heat.colors(20),
+      xaxt = "n", yaxt = "n")
+axis(1, at = 1:length(k_range), labels = k_range)
+axis(2, at = 1:length(weight_cat_options), labels = weight_cat_options)
+points(which(k_range == best_k), 
+       which(weight_cat_options == best_weight), 
+       pch = 4, cex = 3, lwd = 3, col = "blue")
+
+# 2. Silhouette by k for best weight
+best_weight_idx <- which(weight_cat_options == best_weight)
+plot(k_range, results_matrix[best_weight_idx, ], 
+     type = "b", pch = 19, col = "blue", lwd = 2,
+     xlab = "k", ylab = "Silhouette Width",
+     main = sprintf("Best Weight (cat=%.1f)", best_weight))
+points(best_k, best_overall_sil, col = "red", pch = 19, cex = 2)
+
+# 3. Silhouette by weight for best k
+best_k_idx <- which(k_range == best_k)
+plot(weight_cat_options, results_matrix[, best_k_idx], 
+     type = "b", pch = 19, col = "blue", lwd = 2,
+     xlab = "Categorical Weight", ylab = "Silhouette Width",
+     main = sprintf("Best k (k=%d)", best_k))
+points(best_weight, best_overall_sil, col = "red", pch = 19, cex = 2)
+
+# 4. Final silhouette plot
+par(mfrow = c(1, 1))
+plot(best_pam, which.plots = 2, 
+     main = sprintf("Hellinger Combined (cat=%.1f, k=%d, Sil=%.4f)", 
+                    best_weight, best_k, best_overall_sil))
+
+# Cluster profiles
+cat("\n=== CLUSTER PROFILES ===\n")
+cluster_profiles <- df %>%
+  group_by(cluster_hellinger_combined) %>%
+  summarise(
+    n = n(),
+    pct = round(n()/nrow(df)*100, 1),
+    # Categorical
+    light = names(which.max(table(natural_light))),
+    time = names(which.max(table(time_segment))),
+    bad_roads_pct = round(mean(road_conditions_bin == "1")*100, 1),
+    # Numerical
+    temp = round(mean(temp_celsius), 1),
+    precip = round(mean(precipitation_winsorized), 2),
+    wind = round(mean(wind_gusts_winsorized), 1),
+    humidity = round(mean(humidity_percent), 1),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(n))
+
+print(cluster_profiles, width = Inf)
+
+# Save best parameters for future use
+cat("\n=== SAVE THESE PARAMETERS ===\n")
+cat(sprintf("method = 'hellinger'\n"))
+cat(sprintf("weight_categorical = %.1f\n", best_weight))
+cat(sprintf("weight_numerical = %.1f\n", 1-best_weight))
+cat(sprintf("optimal_k = %d\n", best_k))
+```
+
+Now we can use these parameters to investigate the composition of the clusters produced:
+
+```{r}
+library(ggplot2)
+
+# ===== FINAL PARAMETERS =====
+# method = 'hellinger'
+# weight_categorical = 0.9
+# weight_numerical = 0.1
+# optimal_k = 10
+
+cat("=== APPLYING FINAL CLUSTERING SOLUTION ===\n")
+cat("Method: Hellinger (combined)\n")
+cat("Weights: 90% categorical, 10% numerical\n")
+cat("Clusters: k=10\n\n")
+
+# Prepare data
+df_categorical <- df_clean %>% 
+  select(natural_light, time_segment, road_conditions_bin)
+
+df_numerical <- df_clean %>% 
+  select(precipitation_winsorized, temp_celsius, wind_gusts_winsorized, 
+         humidity_percent, dry_spells_winsorized)
+
+# Compute final distances
+dist_cat <- catdist::cdist(df_categorical, method = "hellinger")
+D_cat <- dist_cat$distance_mat
+
+df_numerical_scaled <- scale(df_numerical)
+D_num <- as.matrix(dist(df_numerical_scaled, method = "euclidean"))
+
+# Normalize and combine
+D_cat_norm <- D_cat / max(D_cat)
+D_num_norm <- D_num / max(D_num)
+D_final <- 0.9 * D_cat_norm + 0.1 * D_num_norm
+
+# Final clustering
+pam_final <- pam(D_final, k = 10, diss = TRUE)
+df$cluster <- pam_final$clustering
+
+cat(sprintf("Average Silhouette Width: %.4f\n\n", pam_final$silinfo$avg.width))
+
+# ===== COMPREHENSIVE CLUSTER PROFILES =====
+cat("=== CLUSTER PROFILES (sorted by size) ===\n")
+cluster_profiles <- df %>%
+  group_by(cluster) %>%
+  summarise(
+    n = n(),
+    pct = round(n()/nrow(df)*100, 1),
+    # Dominant characteristics
+    light_mode = names(which.max(table(natural_light))),
+    time_mode = names(which.max(table(time_segment))),
+    # Light distribution
+    night_pct = round(mean(natural_light == "light_night")*100, 0),
+    twilight_pct = round(mean(natural_light == "light_twilight")*100, 0),
+    day_pct = round(mean(natural_light == "light_day")*100, 0),
+    # Road conditions
+    bad_roads_pct = round(mean(road_conditions_bin == "1")*100, 1),
+    # Weather
+    temp_avg = round(mean(temp_celsius), 1),
+    precip_avg = round(mean(precipitation_winsorized), 2),
+    wind_avg = round(mean(wind_gusts_winsorized), 1),
+    humidity_avg = round(mean(humidity_percent), 0),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(n))
+
+print(cluster_profiles, width = Inf)
+
+# ===== LABEL CLUSTERS (Give them meaningful names) =====
+cat("\n=== CLUSTER LABELS ===\n")
+# Based on the profiles above, you can create labels like:
+cluster_labels <- cluster_profiles %>%
+  mutate(
+    label = paste0("C", cluster, ": ", light_mode, " + ", time_mode)
+  ) %>%
+  select(cluster, label, n, pct)
+
+print(cluster_labels)
+
+# Add labels to main dataframe
+df <- df %>%
+  left_join(cluster_labels %>% select(cluster, label), by = "cluster")
+
+# ===== VISUALIZATIONS =====
+
+# 1. Cluster sizes
+p1 <- ggplot(cluster_profiles, aes(x = reorder(factor(cluster), -n), y = n)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  geom_text(aes(label = paste0(n, "\n(", pct, "%)")), vjust = -0.3, size = 3) +
+  labs(title = "Accident Distribution Across 10 Clusters",
+       x = "Cluster", y = "Number of Accidents") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 0))
+
+print(p1)
+
+# 2. Silhouette plot
+plot(pam_final, which.plots = 2, 
+     main = "Silhouette Plot (k=10, Hellinger Combined)")
+
+# 3. Cluster composition by light condition
+p2 <- df %>%
+  group_by(cluster, natural_light) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(cluster) %>%
+  mutate(pct = n/sum(n)*100) %>%
+  ggplot(aes(x = factor(cluster), y = pct, fill = natural_light)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Light Conditions by Cluster",
+       x = "Cluster", y = "Percentage", fill = "Light") +
+  theme_minimal() +
+  scale_fill_manual(values = c("light_night" = "navy", 
+                                "light_twilight" = "steelblue", 
+                                "light_day" = "gold"))
+
+print(p2)
+
+# 4. Weather profiles by cluster
+weather_long <- df %>%
+  select(cluster, temp_celsius, precipitation_winsorized, 
+         wind_gusts_winsorized, humidity_percent) %>%
+  pivot_longer(-cluster, names_to = "variable", values_to = "value")
+
+p3 <- ggplot(weather_long, aes(x = factor(cluster), y = value)) +
+  geom_boxplot(aes(fill = factor(cluster))) +
+  facet_wrap(~variable, scales = "free_y") +
+  labs(title = "Weather Conditions by Cluster",
+       x = "Cluster", y = "Value") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+print(p3)
+
+# ===== CLUSTER QUALITY METRICS =====
+cat("\n=== CLUSTER QUALITY METRICS ===\n")
+cat(sprintf("Average Silhouette Width: %.4f\n", pam_final$silinfo$avg.width))
+cat("\nSilhouette Width by Cluster:\n")
+print(round(pam_final$silinfo$clus.avg.widths, 4))
+
+cat("\nCluster with lowest quality: ", 
+    which.min(pam_final$silinfo$clus.avg.widths), 
+    " (Sil=", round(min(pam_final$silinfo$clus.avg.widths), 4), ")\n")
+cat("Cluster with highest quality: ", 
+    which.max(pam_final$silinfo$clus.avg.widths), 
+    " (Sil=", round(max(pam_final$silinfo$clus.avg.widths), 4), ")\n")
+
+# Number of misclassified observations
+poorly_clustered <- sum(pam_final$silinfo$widths[, "sil_width"] < 0)
+cat(sprintf("\nPoorly clustered accidents: %d (%.1f%%)\n", 
+            poorly_clustered, poorly_clustered/nrow(df)*100))
+
+# ===== SAVE RESULTS =====
+cat("\n=== SAVING RESULTS ===\n")
+
+# Save the clustered data
+write.csv(df, "accidents_clustered_k10.csv", row.names = FALSE)
+cat("✓ Saved: accidents_clustered_k10.csv\n")
+
+# Save cluster profiles
+write.csv(cluster_profiles, "cluster_profiles_k10.csv", row.names = FALSE)
+cat("✓ Saved: cluster_profiles_k10.csv\n")
+
+# Save clustering parameters and medoids
+clustering_info <- list(
+  method = "hellinger_combined",
+  weight_categorical = 0.9,
+  weight_numerical = 0.1,
+  k = 10,
+  silhouette_avg = pam_final$silinfo$avg.width,
+  medoids = pam_final$medoids,
+  cluster_sizes = table(df$cluster)
+)
+
+saveRDS(clustering_info, "clustering_parameters_k10.rds")
+cat("✓ Saved: clustering_parameters_k10.rds\n")
+
+# Save the PAM object
+saveRDS(pam_final, "pam_model_k10.rds")
+cat("✓ Saved: pam_model_k10.rds\n")
+
+cat("\n=== CLUSTERING COMPLETE! ===\n")
+cat("Your 10 clusters are ready for analysis.\n")
+```
+
+```{r}
+# 3. Cluster composition by light condition
+p2 <- df %>%
+  group_by(cluster, natural_light) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(cluster) %>%
+  mutate(pct = n/sum(n)*100) %>%
+  ggplot(aes(x = factor(cluster), y = pct, fill = natural_light)) +
+  geom_bar(stat = "identity", color = "black") +
+  labs(title = "Light Conditions by Cluster",
+       x = "Cluster", y = "Percentage", fill = "Light") +
+  theme_minimal() +
+  scale_fill_manual(values = c("light_night" = "navy", 
+                                "light_twilight" = "steelblue", 
+                                "light_day" = "gold"))
+
+print(p2)
+
+```
+
+```{r}
+# install.packages("factoextra")
+library(factoextra)
+fviz_silhouette(pam_final) +
+  ggplot2::labs(title = "Silhouette Plot (k = 10, Hellinger Combined)")
+
+```
+
+```{r}
+# Create risk matrix
+risk_matrix <- df %>%
+  mutate(
+    light_category = case_when(
+      natural_light == "light_night" ~ "Night",
+      natural_light == "light_twilight" ~ "Twilight",
+      natural_light == "light_day" ~ "Day"
+    ),
+    road_category = ifelse(road_conditions_bin == "1", "Wet-Slippery", "Dry")
+  ) %>%
+  group_by(light_category, road_category) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  pivot_wider(names_from = road_category, values_from = n, values_fill = 0)
+
+cat("RISK MATRIX (Accidents by Light × Road Conditions):\n")
+print(risk_matrix)
+```
+
+```{r}
+# Calculate risk ratios
+risk_analysis <- data.frame(
+  Light = c("Day", "Twilight", "Night"),
+  Bad_Roads = c(1902, 822, 803),
+  Good_Roads = c(8376, 1493, 1453),
+  Total = c(10278, 2315, 2256)
+) %>%
+  mutate(
+    Pct_Bad = round(Bad_Roads / Total * 100, 1),
+    Relative_Risk = round((Bad_Roads / Total) / (1902 / 10278), 2), 
+    Light = factor(Light, levels = c("Day", "Twilight", "Night"))
+  )
+
+print(risk_analysis)
+
+cat("\n=== KEY INSIGHT ===\n")
+cat("Bad road conditions during:\n")
+cat("- DAY:      18.5% of accidents (baseline)\n")
+cat("- NIGHT:    35.6% of accidents (1.9x higher!)\n")
+cat("- TWILIGHT: 35.5% of accidents (1.9x higher!)\n\n")
+
+cat("Night/Twilight accidents are TWICE AS LIKELY to involve bad roads!\n")
+```
+
+```{r}
+library(ggplot2)
+
+# Risk by light condition
+risk_plot <- risk_analysis %>%
+  ggplot(aes(x = Light, y = Pct_Bad, fill = Light)) +
+  geom_bar(stat = "identity", color = "black") +
+  geom_hline(yintercept = 18.5, linetype = "dashed", color = "red", size = 1) +
+  annotate("text", x = 3, y = 20, label = "Day baseline: 18.5%", color = "white") +
+  geom_text(aes(label = paste0(Pct_Bad, "%")), vjust = -0.5, size = 5) +
+  labs(title = "Wet/Slippy Road Accident Rate by Light Condition",
+       subtitle = "Night and Twilight show 2x higher wet/slippy road involvement",
+       x = "Light Condition", 
+       y = "% of Accidents on Wet/Slippy Roads") +
+  scale_fill_manual(values = c("Day" = "gold", "Twilight" = "steelblue", "Night" = "navy")) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  ylim(0, 40)
+
+print(risk_plot)
+
+# Stacked bar chart
+risk_matrix_long <- df %>%
+  mutate(
+    light_category = case_when(
+      natural_light == "light_night" ~ "Night",
+      natural_light == "light_twilight" ~ "Twilight",
+      natural_light == "light_day" ~ "Day"
+    ),
+    road_category = ifelse(road_conditions_bin == "1", "Wet/Slippy Roads", "Dry Roads")
+  )
+
+p4 <- ggplot(risk_matrix_long, aes(x = light_category, fill = road_category)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Road Condition Distribution by Light",
+       x = "Light Condition", y = "Percentage", fill = "") +
+  scale_fill_manual(values = c("Dry Roads" = "steelblue", "Wet/Slippy Roads" = "darkred")) +
+  theme_minimal() +
+  theme(legend.position = "top")
+
+print(p4)
+```
+
+```{r}
+# Add meaningful labels to your clusters
+cluster_interpretations <- data.frame(
+  cluster = 1:10,
+  label = c(
+    "Nighttime - Good Roads",                    # C1
+    "Daytime - Late Morning/Midday",             # C2 (LARGEST)
+    "Daytime - Afternoon",                       # C3
+    "Twilight - Evening Peak",                   # C4
+    "Daytime - Morning Rush (Wet)",              # C5 (2nd LARGEST)
+    "Daytime - Evening Peak (Some bad roads)",   # C6
+    "Daytime - Bad Roads (Wet)",                 # C7
+    "Twilight - Bad Roads",                      # C8
+    "Nighttime - Bad Roads (Wet)",               # C9
+    "Twilight - Evening"                         # C10
+  ),
+  risk_profile = c(
+    "Low",      # C1
+    "Low",      # C2
+    "Low",      # C3
+    "Medium",   # C4
+    "Medium",   # C5
+    "Medium",   # C6
+    "High",     # C7
+    "High",     # C8
+    "High",     # C9
+    "Medium"    # C10
+  )
+)
+
+print(cluster_interpretations)
+
+# Add to your dataframe
+df <- df %>%
+  left_join(cluster_interpretations, by = "cluster")
+```
+
+```{r}
+library(clusterSim)  # For Dunn index
+library(fpc)         # For CH index and alternative calculations
+library(clValid)     # Alternative package for validation
+
+# ===== CALCULATE CLUSTER VALIDITY INDICES =====
+
+cat("=== CLUSTER VALIDITY METRICS ===\n\n")
+
+# Your existing distance matrix and clustering
+# D_final <- your combined distance matrix
+# pam_final <- your PAM clustering result with k=10
+
+# 1. DUNN INDEX (Higher is better, range [0, ∞])
+cat("Calculating Dunn Index...\n")
+dunn_index <- dunn(distance = D_final, clusters = pam_final$clustering)
+cat(sprintf("Dunn Index: %.4f\n", dunn_index))
+cat("Interpretation: Higher = better separated clusters\n\n")
+
+# 2. CALINSKI-HARABASZ INDEX (Higher is better)
+cat("Calculating Calinski-Harabasz (CH) Index...\n")
+
+# Need the original data (not distance matrix) for CH
+# Combine scaled numerical and dummy-coded categorical
+df_numerical_scaled <- scale(df_numerical)
+df_categorical_dummy <- model.matrix(~ . - 1, data = df_categorical)
+df_combined_for_ch <- cbind(df_numerical_scaled, df_categorical_dummy)
+
+# Calculate CH index
+ch_index <- calinhara(df_combined_for_ch, 
+                      pam_final$clustering, 
+                      cn = max(pam_final$clustering))
+cat(sprintf("Calinski-Harabasz Index: %.2f\n", ch_index))
+cat("Interpretation: Higher = better defined clusters\n\n")
+
+# 3. DAVIES-BOULDIN INDEX (Lower is better)
+cat("Calculating Davies-Bouldin Index...\n")
+
+# Manual calculation of Davies-Bouldin
+db_index <- index.DB(df_combined_for_ch, 
+                     pam_final$clustering, 
+                     centrotypes = "centroids")$DB
+cat(sprintf("Davies-Bouldin Index: %.4f\n", db_index))
+cat("Interpretation: Lower = better cluster separation\n\n")
+
+# ===== SUMMARY TABLE =====
+cat("=== SUMMARY ===\n")
+validity_summary <- data.frame(
+  Metric = c("Dunn Index", "Calinski-Harabasz", "Davies-Bouldin", "Silhouette"),
+  Value = c(dunn_index, ch_index, db_index, pam_final$silinfo$avg.width),
+  Better = c("Higher", "Higher", "Lower", "Higher"),
+  Quality = c(
+    ifelse(dunn_index > 0.1, "Good", "Poor"),
+    ifelse(ch_index > 100, "Good", "Moderate"),
+    ifelse(db_index < 1.5, "Good", ifelse(db_index < 2.5, "Moderate", "Poor")),
+    ifelse(pam_final$silinfo$avg.width > 0.5, "Good", 
+           ifelse(pam_final$silinfo$avg.width > 0.25, "Moderate", "Poor"))
+  )
+)
+
+print(validity_summary)
+```
+
+```{r}
+# ===== COMPARE METRICS FOR DIFFERENT k =====
+
+k_range <- 4:10
+results_df <- data.frame(
+  k = integer(),
+  Dunn = numeric(),
+  CH = numeric(),
+  DB = numeric(),
+  Silhouette = numeric()
+)
+
+cat("\n=== TESTING k FROM 4 TO 10 ===\n")
+
+for (k in k_range) {
+  cat(sprintf("Testing k=%d...\n", k))
+  
+  # Cluster with current k
+  pam_k <- pam(D_final, k = k, diss = TRUE)
+  
+  # Calculate metrics
+  dunn_k <- dunn(distance = D_final, clusters = pam_k$clustering)
+  ch_k <- calinhara(df_combined_for_ch, pam_k$clustering, cn = k)
+  db_k <- index.DB(df_combined_for_ch, pam_k$clustering)$DB
+  sil_k <- pam_k$silinfo$avg.width
+  
+  # Store results
+  results_df <- rbind(results_df, data.frame(
+    k = k,
+    Dunn = dunn_k,
+    CH = ch_k,
+    DB = db_k,
+    Silhouette = sil_k
+  ))
+}
+
+print(results_df)
+
+# Find optimal k for each metric
+cat("\n=== OPTIMAL k BY EACH METRIC ===\n")
+cat(sprintf("Dunn (max):       k = %d (%.4f)\n", 
+            results_df$k[which.max(results_df$Dunn)], 
+            max(results_df$Dunn)))
+cat(sprintf("CH (max):         k = %d (%.2f)\n", 
+            results_df$k[which.max(results_df$CH)], 
+            max(results_df$CH)))
+cat(sprintf("DB (min):         k = %d (%.4f)\n", 
+            results_df$k[which.min(results_df$DB)], 
+            min(results_df$DB)))
+cat(sprintf("Silhouette (max): k = %d (%.4f)\n", 
+            results_df$k[which.max(results_df$Silhouette)], 
+            max(results_df$Silhouette)))
+
+# Normalize and average rankings
+results_normalized <- results_df %>%
+  mutate(
+    Dunn_norm = (Dunn - min(Dunn)) / (max(Dunn) - min(Dunn)),
+    CH_norm = (CH - min(CH)) / (max(CH) - min(CH)),
+    DB_norm = 1 - ((DB - min(DB)) / (max(DB) - min(DB))),  # Invert since lower is better
+    Sil_norm = (Silhouette - min(Silhouette)) / (max(Silhouette) - min(Silhouette)),
+    Avg_Score = (Dunn_norm + CH_norm + DB_norm + Sil_norm) / 4
+  )
+
+cat(sprintf("\nBest overall k (averaged): k = %d (score: %.3f)\n", 
+            results_normalized$k[which.max(results_normalized$Avg_Score)],
+            max(results_normalized$Avg_Score)))
+```
+
+```{r}
+# packages
+library(dplyr)
+
+# Example column names:
+# natural_light: "light_twilight", "light_night", "light_day"
+# road_conditions_bin: 1 = wet/slippery, 0 = dry
+
+df_a <- df %>%
+  filter(natural_light %in% c("light_twilight", "light_night")) %>%
+  mutate(is_wet = road_conditions_bin == 1)
+
+# Counts per condition
+counts <- df_a %>%
+  group_by(natural_light) %>%
+  summarise(wet = sum(is_wet), total = n(), .groups = "drop")
+
+counts
+
+# Extract counts
+twilight_wet   <- counts$wet[counts$natural_light == "light_twilight"]
+twilight_total <- counts$total[counts$natural_light == "light_twilight"]
+night_wet      <- counts$wet[counts$natural_light == "light_night"]
+night_total    <- counts$total[counts$natural_light == "light_night"]
+
+# Proportion CIs for each
+binom.test(twilight_wet, twilight_total)  # 95% CI for twilight
+binom.test(night_wet,    night_total)     # 95% CI for night
+
+# Two-proportion test (twilight vs night)
+prop.test(
+  x = c(twilight_wet, night_wet),
+  n = c(twilight_total, night_total),
+  correct = FALSE
+)
+
+```
+
+```{r}
+# install.packages("epitools")
+detach("package:effectsize", unload = TRUE)
+library(epitools)
+
+
+# 2x2 table: rows = light (twilight/night), cols = wet vs dry
+mat <- matrix(c(twilight_wet, twilight_total - twilight_wet,
+                night_wet,    night_total    - night_wet),
+              nrow = 2, byrow = TRUE,
+              dimnames = list(c("Twilight","Night"), c("Wet","Dry")))
+
+riskratio(mat)  # RR with CI
+oddsratio(mat)  # OR with CI
+
+```
