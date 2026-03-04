@@ -70,6 +70,24 @@ Four clustering methods were systematically compared before selecting `clusPCAmi
 - Validated against the **45 official BPP blackpoints** designated by the Municipality of Rome
 - Distinct spatial signatures: motorcycle hotspots, hit-and-run zones, heavy vehicle corridors
 
+![Accident blackspots across Rome](outputs/figures/accident_blackspots.png)
+
+---
+
+# Example Visualisations
+
+**All fatal accidents (2013–2022)**
+![All fatal accidents](outputs/figures/all_fatal_accidents.png)
+
+**Blackspot detail — Vatican area**
+![Blackspot focus Vatican](outputs/figures/blackspot_focus_vatican.png)
+
+**Blackspot detail — Boccea hit and run zone**
+![Blackspot focus Boccea hit and run](outputs/figures/blackspot_focus_boccea_hit_and_run.png)
+
+**Blackspot detail — Boccea scooter/motorcycle hotspot**
+![Blackspot focus Boccea scooter moto](outputs/figures/blackspot_focus_boccea_scooter_moto.png)
+
 ---
 
 # Interactive Map
@@ -331,6 +349,8 @@ Data Scientist – Applied Data Analysis & Generative AI
 
 Master's Degree — *Analisi e Modellazione dei Dati e dei Processi*
 Unitelma Sapienza – Rome, 12-2025
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-0A66C2?logo=linkedin)](https://www.linkedin.com/in/lucy-michaels/)
 
 ---
 
