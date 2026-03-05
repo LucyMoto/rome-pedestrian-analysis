@@ -341,6 +341,22 @@ The analysis identifies **statistical associations and patterns**, not causal re
 
 ---
 
+# Limitations
+
+- Spatial accuracy: Accident locations derived from approximate addresses or lamppost identifiers and commercial geocoding → GPS-enabled police tablets introduced after 2022 may improve accuracy.
+- Incomplete reporting: Some contextual variables in the accident dataset are inconsistently recorded.
+- Temporal heaping: Accident times cluster at rounded intervals (e.g. :00, :30, :10, :20, :40, :50, :15, :45), suggesting approximate rather than exact recording.
+- Weather data resolution: Weather conditions recorded hourly at a single station rather than at the accident location → satellite or dense sensor data could improve precision.
+- Vehicle characteristics unavailable: No information on vehicle mass, bonnet height, or safety systems.
+- Limited cross-city comparison: Comparable high-resolution datasets are not publicly available for most other Italian cities.
+- Injury severity estimates: Based on police assessment at the scene rather than medical evaluation.
+- Missing demographic data: No information on pedestrian age, residency status, or nationality.
+- Exposure data unavailable: Pedestrian and vehicle volumes not available to normalise accident counts → mobility datasets could improve risk estimates.
+- Only accidents reported to the municipal police are included; minor collisions & near-misses underreported.
+- Crossings, traffic control and road design changed over the 10 year period, affecting accident patterns
+
+---
+
 # Future Work
 
 * integration of traffic flow data
